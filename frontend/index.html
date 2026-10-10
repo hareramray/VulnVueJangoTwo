@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>VulnShop — deliberately insecure Vue client</title>
+<!--
+  !! DELIBERATELY INSECURE TRAINING FRONTEND !!
+  Pinned Vue 3 from a CDN so there is no build step.
+  Each weakness is marked [VULN-NN-...]; see docs/Break_and_Fix_Guide.pdf.
+-->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/vue/3.4.21/vue.global.prod.min.js"></script>
+<style>
+  :root{--bg:#0f1117;--card:#1a1d27;--line:#2a2f3d;--fg:#e6e8ee;--mut:#9aa3b2;--acc:#5b9dff;--bad:#ff6b6b;--ok:#4ade80}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif}
+  header{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  header h1{font-size:18px;margin:0}
+  .pill{font-size:11px;padding:2px 8px;border-radius:999px;background:#3a1d1d;color:var(--bad);border:1px solid #5a2a2a}
+  main{max-width:900px;margin:0 auto;padding:20px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h2{font-size:14px;margin:0 0 4px}
+  .tag{font-size:10px;color:var(--mut);font-family:ui-monospace,monospace}
+  input,textarea,button{font:inherit;color:var(--fg);background:#11141c;border:1px solid var(--line);border-radius:8px;padding:8px 10px;width:100%;margin-top:6px}
+  button{background:var(--acc);color:#061024;border:none;cursor:pointer;font-weight:600;width:auto;margin-top:8px}
+  button.ghost{background:#222634;color:var(--fg)}
+  pre{background:#0b0d13;border:1px solid var(--line);border-radius:8px;padding:10px;overflow:auto;max-height:180px;font-size:12px;white-space:pre-wrap;word-break:break-all}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .mut{color:var(--mut)}
+  .who{margin-left:auto;font-size:12px}
+  label{font-size:12px;color:var(--mut)}
+  .comment{border-top:1px solid var(--line);padding:8px 0}
+  .comment b{color:var(--acc)}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>🛒 VulnShop</h1>
+    <span class="pill">INTENTIONALLY VULNERABLE — training only</span>
+    <span class="who mut">
+      <template v-if="me">signed in as <b>{{me}}</b> · <a href="#" @click.prevent="logout">logout</a></template>
+      <template v-else>not signed in</template>
+    </span>
+  </header>
+
+  <main>
+    <p class="mut">Backend: <code>{{API}}</code>. Demo logins: alice/123456, bob/password, admin/admin.
+      Open DevTools and your proxy of choice; every panel maps to one test area.</p>
+
+    <div class="grid">
+
+      <!-- 1 / 3 AUTH + SESSION -->
+      <div class="card">
+        <h2>1·3 Auth &amp; Session</h2>
+        <div class="tag">[VULN-01-AUTH] [VULN-03-SESSION]</div>
+        <input v-model="auth.username" placeholder="username" />
+        <input v-model="auth.password" type="password" placeholder="password" />
+        <div class="row">
+          <button @click="register">Register</button>
+          <button class="ghost" @click="login">Login</button>
+        </div>
+        <label>Forgot password? (token is returned in the response)</label>
+        <button class="ghost" @click="forgot">Request reset token</button>
+        <input v-model="auth.token" placeholder="reset token" />
+        <input v-model="auth.newpw" placeholder="new password" />
+        <button class="ghost" @click="resetPw">Reset (works forever, reusable)</button>
+        <pre v-if="out.auth">{{out.auth}}</pre>
+      </div>
+
+      <!-- 2 ACCESS CONTROL -->
+      <div class="card">
+        <h2>2 Access control (IDOR)</h2>
+        <div class="tag">[VULN-02-ACCESS]</div>
+        <label>Change the id to read someone else's order</label>
+        <input v-model="orderId" placeholder="order id e.g. 1 or 2" />
+        <div class="row">
+          <button @click="getOrder">GET /orders/{id}</button>
+          <button class="ghost" @click="delOrder">DELETE</button>
+        </div>
+        <pre v-if="out.order">{{out.order}}</pre>
+      </div>
+
+      <!-- 4 SQLI -->
+      <div class="card">
+        <h2>4 SQL injection</h2>
+        <div class="tag">[VULN-04-SQLI]</div>
+        <input v-model="q" placeholder="search… try: %' OR 1=1 -- " />
+        <button @click="search">Search orders</button>
+        <pre v-if="out.search">{{out.search}}</pre>
+      </div>
+
+      <!-- 5 XSS -->
+      <div class="card">
+        <h2>5 Stored XSS (comments)</h2>
+        <div class="tag">[VULN-05-XSS] rendered with v-html</div>
+        <input v-model="comment.author" placeholder="name" />
+        <textarea v-model="comment.body" rows="2"
+          placeholder="&lt;img src=x onerror=alert(document.cookie)&gt;"></textarea>
+        <button @click="postComment">Post comment</button>
+        <div>
+          <div class="comment" v-for="c in commentsList" :key="c.id">
+            <b>{{c.author}}</b>
+            <!-- [VULN-05-XSS] raw HTML injected straight into the DOM -->
+            <div v-html="c.body"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5 reflected -->
+      <div class="card">
+        <h2>5 Reflected XSS (greet)</h2>
+        <div class="tag">[VULN-05-XSS] innerHTML of server HTML</div>
+        <input v-model="greetName" placeholder="try: <img src=x onerror=alert(1)>" />
+        <button @click="greet">Fetch greeting</button>
+        <!-- [VULN-05-XSS] server HTML dropped into the page via innerHTML -->
+        <div v-html="out.greet"></div>
+      </div>
+
+      <!-- 6 CSRF -->
+      <div class="card">
+        <h2>6 CSRF (change email)</h2>
+        <div class="tag">[VULN-06-CSRF] no token required</div>
+        <input v-model="email" placeholder="new email" />
+        <button @click="changeEmail">Change email</button>
+        <p class="mut">A malicious page can POST this with your cookie — see
+          <code>docs/csrf-poc.html</code>.</p>
+        <pre v-if="out.email">{{out.email}}</pre>
+      </div>
+
+      <!-- 7 FILES -->
+      <div class="card">
+        <h2>7 Upload &amp; path traversal</h2>
+        <div class="tag">[VULN-07-FILES]</div>
+        <input type="file" @change="pick" />
+        <button @click="upload">Upload (any type/name)</button>
+        <label>Download by path — try <code>../db.sqlite3</code></label>
+        <input v-model="dlPath" placeholder="../db.sqlite3" />
+        <button class="ghost" @click="download">Download</button>
+        <pre v-if="out.file">{{out.file}}</pre>
+      </div>
+
+      <!-- 8 SSRF -->
+      <div class="card">
+        <h2>8 SSRF (import from URL)</h2>
+        <div class="tag">[VULN-08-SSRF]</div>
+        <input v-model="ssrfUrl" placeholder="http://127.0.0.1:8000/api/debug" />
+        <button @click="importUrl">Import</button>
+        <pre v-if="out.ssrf">{{out.ssrf}}</pre>
+      </div>
+
+      <!-- 9 LOGIC -->
+      <div class="card">
+        <h2>9 Business logic (checkout)</h2>
+        <div class="tag">[VULN-09-LOGIC] client sets price</div>
+        <input v-model="cart.item" placeholder="item" />
+        <input v-model.number="cart.price_cents" placeholder="price_cents (try 1 or -100)" />
+        <input v-model.number="cart.quantity" placeholder="quantity (try -5)" />
+        <input v-model="cart.coupon" placeholder="coupon: SAVE50 (reusable)" />
+        <button @click="checkout">Checkout</button>
+        <pre v-if="out.checkout">{{out.checkout}}</pre>
+      </div>
+
+      <!-- 10 API -->
+      <div class="card">
+        <h2>10 API over-exposure</h2>
+        <div class="tag">[VULN-10-API] hidden fields in response</div>
+        <button @click="listUsers">GET /users</button>
+        <p class="mut">UI only shows usernames; expand the raw JSON to see ssn,
+          notes, hashes the page hides.</p>
+        <pre v-if="out.users">{{out.users}}</pre>
+      </div>
+
+      <!-- 11 CONFIG -->
+      <div class="card">
+        <h2>11 Config / info disclosure</h2>
+        <div class="tag">[VULN-11-CONFIG]</div>
+        <button @click="debug">GET /debug</button>
+        <pre v-if="out.debug">{{out.debug}}</pre>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+const { createApp, reactive, toRefs } = Vue;
+
+createApp({
+  setup() {
+    const API = "http://127.0.0.1:8000/api";
+    const s = reactive({
+      API, me: null,
+      auth: { username: "", password: "", token: "", newpw: "" },
+      orderId: "2", q: "", greetName: "", email: "", dlPath: "../db.sqlite3",
+      ssrfUrl: "http://127.0.0.1:8000/api/debug",
+      comment: { author: "attacker", body: "" },
+      cart: { item: "widget", price_cents: 1, quantity: 1, coupon: "" },
+      commentsList: [], _file: null,
+      out: {},
+    });
+
+    // credentials:"include" sends the session cookie cross-origin — the
+    // wide-open CORS + disabled CSRF on the server make this work.
+    const call = async (path, opts = {}) => {
+      const r = await fetch(API + path, {
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        ...opts,
+      });
+      const t = await r.text();
+      try { return JSON.parse(t); } catch { return t; }
+    };
+    const show = (k, v) => { s.out[k] = JSON.stringify(v, null, 2); };
+
+    const refreshWho = async () => {
+      const r = await call("/whoami");
+      s.me = r && r.ok ? r.data.username : null;
+    };
+    const loadComments = async () => {
+      const r = await call("/comments");
+      s.commentsList = (r && r.data) || [];
+    };
+
+    const api = {
+      register: async () => { show("auth", await call("/register", {method:"POST", body: JSON.stringify(s.auth)})); },
+      login: async () => { show("auth", await call("/login", {method:"POST", body: JSON.stringify(s.auth)})); refreshWho(); },
+      logout: async () => { show("auth", await call("/logout", {method:"POST"})); refreshWho(); },
+      forgot: async () => { show("auth", await call("/forgot-password", {method:"POST", body: JSON.stringify({username: s.auth.username})})); },
+      resetPw: async () => { show("auth", await call("/reset-password", {method:"POST", body: JSON.stringify({token: s.auth.token, new_password: s.auth.newpw})})); },
+
+      getOrder: async () => { show("order", await call("/orders/" + s.orderId)); },
+      delOrder: async () => { show("order", await call("/orders/" + s.orderId + "/delete", {method:"POST"})); },
+
+      search: async () => { show("search", await call("/search?q=" + encodeURIComponent(s.q))); },
+
+      postComment: async () => { await call("/comments", {method:"POST", body: JSON.stringify(s.comment)}); loadComments(); },
+      greet: async () => { s.out.greet = await call("/greet?name=" + encodeURIComponent(s.greetName)); },
+
+      changeEmail: async () => { show("email", await call("/change-email", {method:"POST", body: JSON.stringify({email: s.email})})); },
+
+      pick: (e) => { s._file = e.target.files[0]; },
+      upload: async () => {
+        if (!s._file) { show("file", {error:"pick a file"}); return; }
+        const fd = new FormData(); fd.append("file", s._file, s._file.name);
+        const r = await fetch(API + "/upload", {method:"POST", credentials:"include", body: fd});
+        show("file", await r.json());
+      },
+      download: async () => {
+        const r = await fetch(API + "/download?path=" + encodeURIComponent(s.dlPath), {credentials:"include"});
+        const head = (await r.text()).slice(0, 200);
+        show("file", {status:r.status, firstBytes:head});
+      },
+
+      importUrl: async () => { show("ssrf", await call("/import-url", {method:"POST", body: JSON.stringify({url: s.ssrfUrl})})); },
+
+      checkout: async () => { show("checkout", await call("/checkout", {method:"POST", body: JSON.stringify(s.cart)})); },
+      listUsers: async () => { show("users", await call("/users")); },
+      debug: async () => { show("debug", await call("/debug")); },
+    };
+
+    refreshWho(); loadComments();
+    return { ...toRefs(s), ...api };
+  }
+}).mount("#app");
+</script>
+</body>
+</html>

