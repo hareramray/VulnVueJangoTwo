@@ -190,7 +190,9 @@ const { createApp, reactive, toRefs } = Vue;
 
 createApp({
   setup() {
-    const API = "http://127.0.0.1:8000/api";
+    // Use the SAME hostname the page was opened with (localhost vs 127.0.0.1
+    // are different "sites" for cookies, which would silently break sessions).
+    const API = `http://${location.hostname || "127.0.0.1"}:8000/api`;
     const s = reactive({
       API, me: null,
       auth: { username: "", password: "", token: "", newpw: "" },

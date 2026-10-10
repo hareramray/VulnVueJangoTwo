@@ -26,6 +26,11 @@ class WideOpenCorsMiddleware:
         origin = request.headers.get("Origin", "*")
         response["Access-Control-Allow-Origin"] = origin
         response["Access-Control-Allow-Credentials"] = "true"
-        response["Access-Control-Allow-Headers"] = "*"
+        # When credentials are allowed, browsers reject a literal "*" for the
+        # allowed headers, so we reflect exactly what the preflight asked for
+        # (still wide open -- this remains [VULN-11-CONFIG]).
+        requested = request.headers.get("Access-Control-Request-Headers", "Content-Type")
+        response["Access-Control-Allow-Headers"] = requested
         response["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+        response["Access-Control-Max-Age"] = "600"
         return response
